@@ -1,6 +1,7 @@
 import json
 import math
 import os
+os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 import os.path as osp
 import random
 import sys
@@ -14,6 +15,10 @@ import numpy.linalg as LA
 import torch
 from torch.utils.data import Dataset
 from torch.utils.data.dataloader import default_collate
+from perception.webcam_sensor import WebcamSensor
+from autolab_core import ColorImage, Image, PointCloud, RigidTransform, camera_intrinsics
+from phoxipy import PhoXiSensor
+from perception.colorized_phoxi_sensor import ColorizedPhoXiSensor
 
 from sym.config import CI, CM
 
@@ -47,20 +52,31 @@ class ShapeNetDataset(Dataset):
 
     def __getitem__(self, idx):
         prefix = self.filelist[idx]
-        image = cv2.imread(f"{prefix}.png", -1).astype(np.float32) / 255.0
+        image = cv2.imread(f"{prefix}.png", -1).astype(np.float32) 
+        # import pdb;pdb.set_trace() 
+        image = image / 255.0
         # plt.imshow(image)
         # plt.show()
         image = np.rollaxis(image, 2).copy()
+
         depth = cv2.imread(f"{prefix}_depth0001.exr", -1).astype(np.float32)[:, :, 0:1]
+
         depth[depth > 20] = 0
+        plt.imshow(depth)
+        plt.colorbar()
+        plt.show()
         depth[depth < 0] = 0
         depth[depth != depth] = 0
-        depth = np.rollaxis(depth, 2).copy()
+        depth = np.rollaxis(depth, 2).copy() # (256, 256, 1) => (1, 256, 256)
+        
+        
         with open(f"{prefix}.json") as f:
             js = json.load(f)
         Rt, K_ = np.array(js["RT"]), np.array(js["K"])
         K = np.eye(4)
         K[:3, :3] = K_[np.ix_([0, 1, 3], [0, 1, 2])]
+        # K[:3] *= -1
+        # print(Rt, K)
         KRt = K @ Rt
 
         oprefix = self.filelist2[idx]
@@ -68,6 +84,14 @@ class ShapeNetDataset(Dataset):
         fname[: len(oprefix)] = np.frombuffer(oprefix.encode(), "uint8")
 
         depth_scale = 1 / abs(Rt[2][3])
+
+        ########### Take depth as input ##################
+        depth_noisy = depth.copy()
+        depth_noisy += np.random.normal(0, 0.1*abs(Rt[2][3]), depth.shape)
+        image_with_depth = np.concatenate((image, depth_noisy), axis=0)
+        # plt.imshow(np.rollaxis(image_with_depth, 0, 3)[:, :, :4])
+        # plt.show()
+        ########### Take depth as input ##################
 
         S0 = [
             KRt @ np.diagflat([1, -1, 1, 1]) @ LA.inv(KRt),
@@ -77,6 +101,7 @@ class ShapeNetDataset(Dataset):
         result = {
             "fname": torch.tensor(fname).byte(),
             "image": torch.tensor(image).float(),
+            # "image": torch.tensor(image_with_depth).float(),
             "depth": torch.tensor(depth).float() * depth_scale,
             "K": torch.tensor(K).float(),
             "RT": torch.tensor(Rt).float(),
@@ -97,7 +122,6 @@ class Pix3dDataset(Dataset):
     def __init__(self, rootdir, split):
         self.rootdir = rootdir
         self.split = split
-
         with open(f"{rootdir}/pix3d_info.json", "r") as fin:
             data_lists = json.load(fin)
         data_valid = set(np.loadtxt(f"{rootdir}/pix3d-valid.txt", dtype=str))
@@ -136,7 +160,7 @@ class Pix3dDataset(Dataset):
         fdepth = osp.join(self.rootdir, data_item["depth"])
         fmask = osp.join(self.rootdir, data_item["mask"])
 
-        image = cv2.imread(fimage, -1).astype(np.float32) / 255.0
+        image = cv2.imread(fimage, -1).astype(np.float32)/255.0
         image = np.rollaxis(image, 2).copy()
         mask = cv2.imread(fmask).astype(np.float32)[None, :, :, 0] / 255.0
         image = np.concatenate([image, mask])
@@ -190,6 +214,108 @@ class Pix3dDataset(Dataset):
 
         return result
 
+class RealDataset(Dataset):
+    def __init__(self, rootdir, split):
+        self.rootdir = rootdir
+        self.split = split
+
+        self.camera = PhoXiSensor("1703005")
+        self.camera.start()
+        self.camera._set_intr()
+        filelist = glob(f"{rootdir}/*.npy")
+        #Get all the items that have "segmented" in its file name.
+        filelist = [s for s in filelist if "segmented" in s]
+        print(filelist)
+        self.filelist = filelist
+        self.size = len(self.filelist)
+        print(f"n{split}:", self.size)
+
+    def __len__(self):
+        return self.size
+
+    def __getitem__(self, idx):
+        prefix = self.filelist[idx]
+
+        # image = cv2.imread(f"{prefix}", -1).astype(np.float32)
+        image = np.load(f"{prefix}", allow_pickle=True)
+        print("png taken in image shape", image.shape)
+        depth = image[:,:,3:]
+        image = image[:,:,:3]
+        # import pdb;pdb.set_trace()
+        # image[:,:,-1] = image[:,:,-1] * 255
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2RGBA) 
+        image[:,:,:3] = image[:,:,:3] / 255.0
+        print(image.shape)
+        plt.imshow(image)
+        plt.show()
+
+        ############# if also feed in depth as input ############
+        # image = np.concatenate((image, depth), axis=2)
+        # print(image.mean(axis=2))
+        #########################################################
+
+        image = np.rollaxis(image, 2).copy()
+        print(image.shape)
+
+        # K = np.identity(4)
+        # K[:3, :3] = self.camera._camera_intr._K
+        # K[0, 2] = 550 + 128
+        # K[1, 2] = 280 + 128
+        # K[2, 2] = -1
+        x_dim = 1032
+        y_dim = 772
+        clip_x = 190+130
+        clip_y = 190
+        height = y_dim - 2*clip_y
+        width = x_dim - 2*clip_x
+        #Row of crop window center
+        crop_ci = clip_y + height / 2
+        crop_cj = clip_x + width / 2
+        # K = np.identity(4)
+        # K[:3, :3] = self.camera._camera_intr._K
+        # print("K", K)
+        # K[0, 2] -= clip_x
+        # K[1, 2] -= clip_y
+        # K[0] *= 256/(x_dim - 2*clip_x)
+        # # K[1] *= 256 / (x_dim - 2 * clip_x)
+        # # K[0] *= 256 / (y_dim - 2 * clip_y)
+        # # KRt = K @ Rt
+        # K[1] *= 256 / (y_dim - 2 * clip_y)
+        # K[2,2] = -1
+        camera_intrinsics = self.camera.intrinsics
+        # print("K before cropping", self.camera.intrinsics._K)
+        camera_intrinsics = camera_intrinsics.crop(height, width, crop_ci, crop_cj)
+        camera_intrinsics = camera_intrinsics.resize(256 / height)
+        K = np.identity(4)
+        K[:3, :3] = camera_intrinsics._K
+        # K[2,2] = -1
+        # K[:3] *= -1
+        print("K", K)
+
+        oprefix = self.filelist[idx]
+        fname = np.zeros([60], dtype="uint8")
+        fname[: len(oprefix)] = np.frombuffer(oprefix.encode(), "uint8")
+
+        # depth_scale = 1 / abs(Rt[2][3])
+
+
+        result = {
+            "fname": torch.tensor(fname).byte(),
+            "image": torch.tensor(image).float(),
+            "depth": torch.tensor(depth).float(),
+            "K": torch.tensor(K).float()
+            # "RT": None,
+        }
+        #
+        # w0, ws = sample_plane(Rt)
+        # S = [K @ w2S(w) @ LA.inv(K) for w in ws]
+        # y = [to_label(w, w0) for w in ws]
+        # result["S"] = None
+        # result["y"] = None
+        # result["w"] = None
+        # result["w0"] = None
+
+        return result
 
 def sample_plane(Rt, plane=np.array([0, 1, 0, 0]), plane2=np.array([1, 0, 0, 0])):
     w0_ = LA.inv(Rt).T @ plane

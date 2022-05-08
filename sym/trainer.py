@@ -12,7 +12,7 @@ import torch
 import sym.models.mvsnet as mvs
 from sym.config import CI, CM, CO
 from sym.utils import benchmark
-
+from torch.utils.tensorboard import SummaryWriter
 
 class Trainer(object):
     def __init__(
@@ -38,6 +38,8 @@ class Trainer(object):
         self.loss_labels = None
         self.avg_metrics = None
         self.metrics = np.zeros(0)
+
+        self.writer = SummaryWriter(f"{self.out}/logdir")
 
     def _loss(self, result):
         losses = result["losses"]
@@ -116,7 +118,8 @@ class Trainer(object):
             " " * 7,
         )
         self.mean_loss = total_loss / len(self.val_loader)
-
+        self.writer.add_scalar('Loss/val', self.mean_loss, self.iteration)
+        
         torch.save(
             {
                 "iteration": self.iteration,
@@ -152,6 +155,8 @@ class Trainer(object):
             result = self.model(input, "train")
 
             loss = self._loss(result)
+            self.writer.add_scalar('Loss/train', loss, self.iteration)
+
             if np.isnan(loss.item()):
                 raise ValueError("loss is nan while training")
             loss.backward()

@@ -11,7 +11,7 @@ import numpy as np
 mpl.rcParams.update({"font.size": 16})
 plt.rcParams["font.family"] = "Times New Roman"
 del mpl.font_manager.weight_dict["roman"]
-mpl.font_manager._rebuild()
+# mpl.font_manager._rebuild()
 
 error_types = [
     ("err_depth_avg", "Depth Error (Average L1)"),

@@ -12,7 +12,7 @@ mpl.rcParams.update({"font.size": 16})
 # plt.rcParams["figure.figsize"] = (8, 6)
 plt.rcParams["font.family"] = "Times New Roman"
 del mpl.font_manager.weight_dict["roman"]
-mpl.font_manager._rebuild()
+# mpl.font_manager._rebuild()
 
 for err_key in ["err_normal"]:
     plt.figure()

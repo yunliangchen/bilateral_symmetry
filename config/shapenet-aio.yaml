@@ -4,7 +4,7 @@ io:
   dataset: ShapeNet
   resume_from:
   num_workers: 4
-  num_visualization: 8
+  num_visualization: 100
   validation_interval: 72000
   validation_debug: 360
   depth_min: 0.64
@@ -24,8 +24,12 @@ model:
   # loss should be in ["L1_smooth", "L1", "L2", "Ordinal"]
   loss: L1
   num_depth: 64
-
+  enable_depth: true
+  weight_depth: [0.01, 0.1, 0.3, 1.0, 1.0, 1.0, 1.0, 1.0]
+  # weight_depth: [0.01, 0.01, 0.05, 0.10, .5, .5, .5, .5]
+  weight_detection: 0.03
   detection:
+    dropout: 0.0
     enabled: true
     sample_hard_negative: false
     fc_channel: 512
@@ -36,10 +40,8 @@ model:
       - 0.11241163585977465  # deg: 6.4407123029265465
       - 0.03482301585266065  # deg: 1.9952118382746151
       - 0.010784006776847217  # deg: 0.6178780745538237
-    weight_depth: [0.01, 0.1, 0.3, 1.0, 1.0, 1.0, 1.0, 1.0]
-    # weight_depth: [0.01, 0.01, 0.05, 0.10, .5, .5, .5, .5]
-    weight_detection: 0.03
-    dropout: 0.0
+
+  
 
 optim:
   name: Adam

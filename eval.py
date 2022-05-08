@@ -148,7 +148,7 @@ def main():
             depth = result["preds"]["depth"].cpu().numpy()[0, :]
             del result
 
-            # visualize(ws, score, w0)
+            visualize(ws, score, w0)
             best_w = np.argmax(score)
             w = ws[best_w]
             ww.append(w)

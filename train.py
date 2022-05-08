@@ -95,7 +95,7 @@ def main():
     device = torch.device(device_name)
 
     # 1. dataset
-    batch_size = CM.batch_size * num_gpus
+    batch_size = CM.batch_size * 1#num_gpus
     datadir = CI.datadir
     kwargs = {
         "batch_size": batch_size,
@@ -122,12 +122,17 @@ def main():
 
     # 2. model
     model = sym.models.SymmetryNet().to(device)
+    for name, param in model.named_parameters():
+        print(name)
+    # print(list(checkpoint["model_state_dict"].keys()))
     print("# of params:", count_parameters(model))
     model = sym.utils.MyDataParallel(
         model, device_ids=list(range(args["--devices"].count(",") + 1))
     )
     if resume_from:
         for module_name in list(checkpoint["model_state_dict"].keys()):
+            if module_name.startswith("module.backbone.feature_network.backbone.0."):
+                del checkpoint["model_state_dict"][module_name]
             if module_name.startswith("module.backbone.volume_network.fc"):
                 del checkpoint["model_state_dict"][module_name]
         model.load_state_dict(checkpoint["model_state_dict"], strict=False)

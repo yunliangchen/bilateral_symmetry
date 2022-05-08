@@ -2,3 +2,14 @@
 /data
 /logs
 /results
+PhotoneoLogFiles/
+__pycache__/
+images/
+sampling_data/
+real_images/
+temp_output/
+torch
+shampoo_pixellib.png
+pointrend_resnet50.pkl
+mask_rcnn_coco.h5
+car_test.obj

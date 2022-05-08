@@ -116,25 +116,29 @@ def warp(x0, S, gamma):
     Returns:
         3D cost volume of shape [N, C, D, H, W]
     """
-    N, C, H, W = x0.shape
-    D = len(gamma)
+    N, C, H, W = x0.shape # (36, 32, 64, 64)
+    D = len(gamma) # (64,)
     with torch.no_grad():
-        y, x = torch.meshgrid(
+        y, x = torch.meshgrid( # (64,) (64,)
             [
                 torch.arange(0, H, dtype=torch.float32, device=x0.device) + 0.5,
                 torch.arange(0, W, dtype=torch.float32, device=x0.device) + 0.5,
             ]
         )
         # make x, y, z have shape [D*H*W]
-        x = (x.flatten() * 2 / W - 1).repeat(D)
-        y = (1 - y.flatten() * 2 / H).repeat(D)
-        z = gamma.repeat_interleave(H * W)
+        x = (x.flatten() * 2 / W - 1).repeat(D) # (262144,) x is now between -1 and 1
+        y = (1 - y.flatten() * 2 / H).repeat(D) # (262144,) y is now between -1 and 1
+        z = gamma.repeat_interleave(H * W) # (262144,)
         # S: [N, 4, 4]
-        xyz = torch.stack([x * z, y * z, z, torch.ones_like(x)])[None]  # [1, 4, DHW]
-        p = torch.matmul(S, xyz).view(N, 4, D, H, W)  # [N, 4, D, H, W]
-        p = p[:, :2] / (p[:, 2:3] * p[:, 3:4]).clamp(min=1e-6)  # [N, 2, D, H, W]
-        grid = torch.stack([p[:, 0], -p[:, 1]], 4).view(N, D * H, W, 2)
-    return F.grid_sample(x0, grid, align_corners=False).view(N, C, D, H, W)
+        xyz = torch.stack([x * z, y * z, z, torch.ones_like(x)])[None]  # [1, 4, DHW] # (1, 4, 262144)
+        p = torch.matmul(S, xyz).view(N, 4, D, H, W)  # [N, 4, D, H, W] (36, 4, 64, 64, 64)
+        p = p[:, :2] / (p[:, 2:3] * p[:, 3:4]).clamp(min=1e-6)  # [N, 2, D, H, W] (36, 2, 64, 64, 64)
+        grid = torch.stack([p[:, 0], -p[:, 1]], 4).view(N, D * H, W, 2) # (36, 4096, 64, 2) negative probably due to 1-y in the previous line
+        # For each output location output[N, :, D*H, W], the size-2 vector grid[N, D*H, W] specifies the x0 pixel locations x and y,
+        # which are used to interpolate the output value output [N, : D*H, W].
+        # For each (x, y) uniform on the original image, for each w, for each d, compute (X, Y, Z) under the transform of w => (X', Y', Z')
+        # => reproject back to (x', y') => warp by putting feature at (x, y) to (x', y')
+    return F.grid_sample(x0, grid, align_corners=False).view(N, C, D, H, W) # (36, 32, 64*64, 64) => (36, 32, 64, 64, 64) we put the C at the (2,) location of grid to the grid position
 
 
 def depth_softargmin(cost, gamma):

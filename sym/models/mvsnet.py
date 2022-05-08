@@ -18,7 +18,7 @@ from sym.models.utils import (
     warp,
 )
 from sym.utils import benchmark
-
+from collections import OrderedDict
 
 class MVSNet(nn.Module):
     def __init__(self):
@@ -41,27 +41,27 @@ class MVSNet(nn.Module):
         D = len(gamma)
 
         # step 1. feature extraction
-        x = self.feature_network(image)  # [N, 32, H, W]
+        x = self.feature_network(image)  # [N, 32, H, W] [6, 64, 64, 64]
         N, _, H, W = x.shape
         c = 1
 
         # step 2. differentiable homograph, build cost volume
         # during training, duplicate images for sampling symmetric axis
-        c = S.shape[1]
-        x2d = x.repeat_interleave(c, dim=0)
+        c = S.shape[1] # S: [6, 6, 4, 4]
+        x2d = x.repeat_interleave(c, dim=0) #[36, 64, 64, 64]
 
-        x = self.fc(x).repeat_interleave(c, dim=0)
-        vol = [x.unsqueeze(2).repeat(1, 1, D, 1, 1)]
+        x = self.fc(x).repeat_interleave(c, dim=0) #[36, 32, 64, 64]
+        vol = [x.unsqueeze(2).repeat(1, 1, D, 1, 1)] #[36, 32, 64, 64, 64] 6 image, 6 w, 64 D
         if CM.cat_depth_feature:
             vol.append(self.depth_feature.repeat(N * c, 1, 1, H, W))
-        S = S.view(N * c, 4, 4)
-        vol.append(warp(x, S, gamma))
-        vol = torch.cat(vol, 1)
+        S = S.view(N * c, 4, 4) # [36, 4, 4]
+        vol.append(warp(x, S, gamma)) # list of 2 tensors (36, 32, 64, 64, 64)
+        vol = torch.cat(vol, 1) # [N*c, 32*2, D, H, W] = (36, 64, 64, 64, 64)
 
         # step 3. cost volume regularization
-        cost, x3d = self.volume_network(vol)
+        cost, x3d = self.volume_network(vol) # cost: (36, 64, 64, 64), x3d: (36, 256, 4, 4, 4)
         prob = F.softmax(cost, dim=1)
-        depth = depth_softargmin(prob, gamma)
+        depth = depth_softargmin(prob, gamma) # (36, 1, 64, 64) weighted depth for each pixel for each w
 
         if CM.do_refine:
             depth = self.refine(depth, x)
@@ -101,6 +101,7 @@ class FeatureNet(nn.Module):
             )
         else:
             self.backbone = nn.Sequential(
+                # nn.Conv2d(5, 64, 5, 2, 2), #with depth as input
                 nn.Conv2d(4, 64, 5, 2, 2),
                 BasicBlock(64, 64),
                 BasicBlock(64, 64),
@@ -215,7 +216,7 @@ class DetectionNet(nn.Module):
             )
 
     def forward(self, x2d, x3d, w):
-        N, c, _ = w.shape
+        N, c, _ = w.shape # 6, 6, 3
         x = self.fc3d(self.flatten3d(x3d))
         return x.view(N, c, CM.detection.n_level)
 
